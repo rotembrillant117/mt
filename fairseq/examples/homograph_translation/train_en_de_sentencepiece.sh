@@ -53,7 +53,7 @@ lang=en-de
 
 EXPERIMENT_NAME="${EXPERIMENT_PREFIX}_jamo_type_${JAMO_TYPE}_tokenizer_type_${TOKENIZER_TYPE}_BPE_${SRC_BPE_TOKENS}_${TGT_BPE_TOKENS}_dropout_${SRC_DROPOUT}_${TGT_DROPOUT}_seed_${SEED}.${lang}"
 
-mkdir ../../${src}_${tgt}_sentencepiece_experiment_outputs
+mkdir -p ../../${src}_${tgt}_sentencepiece_experiment_outputs
 
 prep=experiments/$EXPERIMENT_NAME
 tmp=$prep/tmp
@@ -66,24 +66,46 @@ then
     exit 0
 fi
 
-mkdir $prep
+mkdir -p $prep
 
-mkdir data-bin/$EXPERIMENT_NAME
+mkdir -p data-bin/$EXPERIMENT_NAME
 
 BPE_CODE=$prep/code
 BPE_VOCAB=$prep/vocab
 
-spm_train --input=$orig/train.$src,$orig/train.$tgt --model_prefix=$prep/joint_tokenizer --vocab_size=$SRC_BPE_TOKENS --model_type=${TOKENIZER_TYPE}
+python - <<PY
+import sentencepiece as spm
+spm.SentencePieceTrainer.Train(
+    input="$orig/train.$src,$orig/train.$tgt",
+    model_prefix="$prep/joint_tokenizer",
+    vocab_size=int("$SRC_BPE_TOKENS"),
+    model_type="$TOKENIZER_TYPE",
+)
+PY
 
 python3 dump_unigram_vocab.py $prep/joint_tokenizer.vocab $prep/joint_tokenizer.dict
 
 for f in train valid test; do
-    echo "spm_encode (joint tokenizer) ($src) to ${f}.${src}..."
-    spm_encode --model $prep/joint_tokenizer.model --output_format=piece --input=$orig/$f.$src --output=$prep/$f.$src
+    echo "encode (joint tokenizer) ($src) to ${f}.${src}..."
+    python - <<PY
+import sentencepiece as spm
+sp = spm.SentencePieceProcessor(model_file="$prep/joint_tokenizer.model")
+with open("$orig/$f.$src", "r", encoding="utf-8") as fin, open("$prep/$f.$src", "w", encoding="utf-8") as fout:
+    for line in fin:
+        pieces = sp.encode(line.strip(), out_type=str)
+        fout.write(" ".join(pieces) + "\n")
+PY
     cp $prep/$f.$src data-bin/$EXPERIMENT_NAME/$f.$src
 
-    echo "spm_encode (joint tokenizer) ($tgt) to ${f}.${tgt}..."
-    spm_encode --model $prep/joint_tokenizer.model --output_format=piece --input=$orig/$f.$tgt --output=$prep/$f.$tgt
+    echo "encode (joint tokenizer) ($tgt) to ${f}.${tgt}..."
+    python - <<PY
+import sentencepiece as spm
+sp = spm.SentencePieceProcessor(model_file="$prep/joint_tokenizer.model")
+with open("$orig/$f.$tgt", "r", encoding="utf-8") as fin, open("$prep/$f.$tgt", "w", encoding="utf-8") as fout:
+    for line in fin:
+        pieces = sp.encode(line.strip(), out_type=str)
+        fout.write(" ".join(pieces) + "\n")
+PY
     cp $prep/$f.$tgt data-bin/$EXPERIMENT_NAME/$f.$tgt
 done
 
@@ -95,15 +117,14 @@ fairseq-preprocess --source-lang $src --target-lang $tgt \
     --destdir examples/homograph_translation/data-bin/$EXPERIMENT_NAME \
     --workers 8 \
     --joined-dictionary \
-    --srcdict examples/homograph_translation/experiments/$EXPERIMENT_NAME/joint_tokenizer.dict \
-    --tgtdict examples/homograph_translation/experiments/$EXPERIMENT_NAME/joint_tokenizer.dict
+    --srcdict examples/homograph_translation/experiments/$EXPERIMENT_NAME/joint_tokenizer.dict
 
 cp ${TEXT}/joint_tokenizer.model ${TEXT}/joint_tokenizer.vocab ${TEXT}/joint_tokenizer.dict examples/homograph_translation/data-bin/$EXPERIMENT_NAME/
 cp ${TEXT}/joint_tokenizer.dict examples/homograph_translation/data-bin/$EXPERIMENT_NAME/dict.${src}.txt
 cp ${TEXT}/joint_tokenizer.dict examples/homograph_translation/data-bin/$EXPERIMENT_NAME/dict.${tgt}.txt
 
 
-mkdir ${src}_${tgt}_sentencepiece_experiment_outputs/${EXPERIMENT_NAME}/
+mkdir -p ${src}_${tgt}_sentencepiece_experiment_outputs/${EXPERIMENT_NAME}/
 
 CUDA_VISIBLE_DEVICES=$DEVICE nohup fairseq-train  examples/homograph_translation/data-bin/$EXPERIMENT_NAME \
                                             --arch transformer_iwslt_de_en \
@@ -148,7 +169,10 @@ CUDA_VISIBLE_DEVICES=$DEVICE nohup fairseq-generate examples/homograph_translati
                                         --beam 5 \
                                         --max-len-a 1.2 \
                                         --max-len-b 10 \
-                                        --remove-bpe=sentencepiece_${JAMO_TYPE} > ${src}_${tgt}_sentencepiece_experiment_outputs/${EXPERIMENT_NAME}/bleu_unprocessed.log
+                                        --remove-bpe=sentencepiece_${JAMO_TYPE} \
+                                        --source-lang=$src \
+                                        --target-lang=$tgt \
+                                        > ${src}_${tgt}_sentencepiece_experiment_outputs/${EXPERIMENT_NAME}/bleu_unprocessed.log
 
 
 
