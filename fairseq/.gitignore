@@ -139,3 +139,11 @@ wandb/
 nohup.out
 multirun
 outputs
+
+.venv/
+.venv1/
+*.pyc
+fairseq/examples/homograph_translation/data-bin/
+fairseq/examples/homograph_translation/experiments/
+fairseq/en_de_sentencepiece_experiment_outputs/
+fairseq/examples/homograph_translation/orig/en_de_standard/
